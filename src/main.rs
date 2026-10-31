@@ -1,6 +1,6 @@
 use cranelift_codegen::ir::{AbiParam, InstBuilder, Signature, types};
 use cranelift_codegen::isa::CallConv;
-use cranelift_codegen::settings;
+use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::{FuncId, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
@@ -74,9 +74,12 @@ fn forwarding_function(
 }
 
 fn generate(path: &Path) -> Result<()> {
+    let mut flags = settings::builder();
+    // Native linkers (particularly Mach-O) require position-independent calls.
+    flags.set("is_pic", "true")?;
     let isa = cranelift_native::builder()
         .map_err(std::io::Error::other)?
-        .finish(settings::Flags::new(settings::builder()))?;
+        .finish(settings::Flags::new(flags))?;
     println!(
         "native target: {}; C ABI: {:?}",
         isa.triple(),
@@ -177,7 +180,8 @@ fn main() -> Result<()> {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| "target/probes".into());
     std::fs::create_dir_all(&out)?;
-    let out = out.canonicalize()?;
+    // Preserve ordinary Windows paths: MSVC rejects canonicalize verbatim prefixes.
+    let out = std::path::absolute(out)?;
     let object = out.join(if cfg!(windows) {
         "probes.obj"
     } else {
